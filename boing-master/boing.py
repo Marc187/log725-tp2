@@ -1,10 +1,24 @@
-import pgzero, pgzrun, pygame
-import math, sys, random
+import math
+import random
+import sys
 from enum import Enum
+
+import pgzero
+import pgzrun
+import pygame
+
+from pgzero.actor import Actor
+from pgzero.keyboard import keyboard
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pgzero.builtins import screen, music, sounds
+
 
 # Check Python version number. sys.version_info gives version as a tuple, e.g. if (3,7,2,'final',0) for version 3.7.2.
 # Unlike many languages, Python can compare two tuples in the same way that you can compare numbers.
-if sys.version_info < (3,6):
+if sys.version_info < (3, 6):
     print("This game requires at least version 3.6 of Python. Please download it from www.python.org")
     sys.exit()
 
@@ -14,7 +28,7 @@ if sys.version_info < (3,6):
 # a component of the version to contain letters as well as numbers (e.g. '2.0.dev0')
 # We're using a Python feature called list comprehension - this is explained in the Bubble Bobble/Cavern chapter.
 pgzero_version = [int(s) if s.isnumeric() else s for s in pgzero.__version__.split('.')]
-if pgzero_version < [1,2]:
+if pgzero_version < [1, 2]:
     print(f"This game requires at least version 1.2 of Pygame Zero. You have version {pgzero.__version__}. Please upgrade using the command 'pip3 install --upgrade pgzero'")
     sys.exit()
 
@@ -29,13 +43,15 @@ HALF_HEIGHT = HEIGHT // 2
 PLAYER_SPEED = 6
 MAX_AI_SPEED = 6
 
+
 def normalised(x, y):
     # Return a unit vector
     # Get length of vector (x,y) - math.hypot uses Pythagoras' theorem to get length of hypotenuse
     # of right-angle triangle with sides of length x and y
     # todo note on safety
     length = math.hypot(x, y)
-    return (x / length, y / length)
+    return x / length, y / length
+
 
 def sign(x):
     # Returns -1 or 1 depending on whether number is positive or negative
@@ -59,7 +75,7 @@ class Impact(Actor):
 
 class Ball(Actor):
     def __init__(self, dx):
-        super().__init__("ball", (0,0))
+        super().__init__("ball", (0, 0))
 
         self.x, self.y = HALF_WIDTH, HALF_HEIGHT
 
@@ -108,7 +124,7 @@ class Ball(Actor):
 
                 difference_y = self.y - bat.y
 
-                if difference_y > -64 and difference_y < 64:
+                if -64 < difference_y < 64:
                     # Ball has collided with bat - calculate new direction vector
 
                     # To understand the maths used below, we first need to consider what would happen with this kind of
@@ -196,7 +212,7 @@ class Bat(Actor):
         # is meant to be player controlled, move_func will be a function that when called, returns a number indicating
         # the direction and speed in which the bat should move, based on the keys the player is currently pressing.
         # If move_func is None, this indicates that this bat should instead be controlled by the AI method.
-        if move_func != None:
+        if move_func is not None:
             self.move_func = move_func
         else:
             self.move_func = self.ai
@@ -320,12 +336,12 @@ class Game:
 
     def draw(self):
         # Draw background
-        screen.blit("table", (0,0))
+        screen.blit("table", (0, 0))
 
         # Draw 'just scored' effects, if required
-        for p in (0,1):
+        for p in (0, 1):
             if self.bats[p].timer > 0 and game.ball.out():
-                screen.blit("effect" + str(p), (0,0))
+                screen.blit("effect" + str(p), (0, 0))
 
         # Draw bats, ball and impact effects - in that order. Square brackets are needed around the ball because
         # it's just an object, whereas the other two are lists - and you can't directly join an object onto a
@@ -334,11 +350,11 @@ class Game:
             obj.draw()
 
         # Display scores - outer loop goes through each player
-        for p in (0,1):
+        for p in (0, 1):
             # Convert score into a string of 2 digits (e.g. "05") so we can later get the individual digits
             score = f"{self.bats[p].score:02d}"
             # Inner loop goes through each digit
-            for i in (0,1):
+            for i in (0, 1):
                 # Digit sprites are numbered 00 to 29, where the first digit is the colour (0 = grey,
                 # 1 = blue, 2 = green) and the second digit is the digit itself
                 # Colour is usually grey but turns red or green (depending on player number) when a
@@ -346,7 +362,7 @@ class Game:
                 colour = "0"
                 other_p = 1 - p
                 if self.bats[other_p].timer > 0 and game.ball.out():
-                    colour = "2" if p == 0  else "1"
+                    colour = "2" if p == 0 else "1"
                 image = "digit" + colour + str(score[i])
                 screen.blit(image, (255 + (160 * p) + (i * 55), 46))
 
@@ -364,8 +380,9 @@ class Game:
             # to access an attribute of Pygame Zero's sounds object, we must use Python's built-in function getattr
             try:
                 getattr(sounds, name + str(random.randint(0, count - 1))).play()
-            except Exception as e:
+            except Exception:
                 pass
+
 
 def p1_controls():
     move = 0
@@ -375,6 +392,7 @@ def p1_controls():
         move = -PLAYER_SPEED
     return move
 
+
 def p2_controls():
     move = 0
     if keyboard.m:
@@ -383,10 +401,12 @@ def p2_controls():
         move = -PLAYER_SPEED
     return move
 
+
 class State(Enum):
     MENU = 1
     PLAY = 2
     GAME_OVER = 3
+
 
 num_players = 1
 
@@ -412,8 +432,7 @@ def update():
             # player 1, and if we're in 2 player mode, the controls function for player 2 (otherwise the
             # 'None' value indicating this player should be computer-controlled)
             state = State.PLAY
-            controls = [p1_controls]
-            controls.append(p2_controls if num_players == 2 else None)
+            controls = [p1_controls, p2_controls if num_players == 2 else None]
             game = Game(controls)
         else:
             # Detect up/down keys
@@ -443,15 +462,16 @@ def update():
             # Create a new Game object, without any players
             game = Game()
 
+
 def draw():
     game.draw()
 
     if state == State.MENU:
         menu_image = "menu" + str(num_players - 1)
-        screen.blit(menu_image, (0,0))
+        screen.blit(menu_image, (0, 0))
 
     elif state == State.GAME_OVER:
-        screen.blit("over", (0,0))
+        screen.blit("over", (0, 0))
 
 
 # The mixer allows us to play sounds and music
