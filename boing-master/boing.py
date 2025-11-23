@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pgzero.builtins import screen, music, sounds
 
-
 # Check Python version number. sys.version_info gives version as a tuple, e.g. if (3,7,2,'final',0) for version 3.7.2.
 # Unlike many languages, Python can compare two tuples in the same way that you can compare numbers.
 if sys.version_info < (3, 6):
@@ -57,6 +56,83 @@ def sign(x):
     # Returns -1 or 1 depending on whether number is positive or negative
     return -1 if x < 0 else 1
 
+
+######################################################################################################
+#                                            ECS CLASSES                                             #
+######################################################################################################
+
+
+class Entity:
+    def __init__(self, entity_id):
+        self.id = entity_id
+        self.components = {}
+
+    def add_component(self, component):
+        self.components[component.__class__] = component
+
+    def get_component(self, component_type):
+        return self.components.get(component_type)
+
+
+class PositionComponent:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
+class SpriteComponent:
+    def __init__(self, image_name):
+        self.image_name = image_name
+
+
+class PlayerComponent:
+    def __init__(self, player_id):
+        self.id = id
+
+
+class TimerComponent:
+    def __init__(self, timer):
+        self.timer = timer
+
+
+class RenderSystem:
+    def __init__(self, screen):
+        self.screen = screen
+
+    def update(self, entities):
+        for entity in entities:
+            position = entity.get_component(PositionComponent)
+            sprite = entity.get_component(SpriteComponent)
+            if position and sprite:
+                self.screen.blit(sprite.image_name, (position.x, position.y))
+
+
+class BatAnimationSystem:
+    def __init__(self, gameObj):
+        self.game = gameObj
+
+    def update(self, entities):
+        for e in entities:
+            player = e.get(PlayerComponent)
+            timer = e.get(TimerComponent)
+            sprite = e.get(SpriteComponent)
+
+            if not (player and timer and sprite):
+                continue
+
+            # decide the FRAME (0, 1, or 2)
+            if timer.value <= 0:
+                frame = 0
+            else:
+                if self.game.ball.out():
+                    frame = 2
+                else:
+                    frame = 1
+
+            sprite.image_name = f"bat{player.id}{frame}"
+
+
+######################################################################################################
 
 # Class for an animation which is displayed briefly whenever the ball bounces
 class Impact(Actor):
@@ -297,6 +373,19 @@ class Game:
         # in the centre of the bat
         self.ai_offset = 0
 
+        # ECS IMPLEMENTATION
+        self.entities = []
+        bat0 = Entity("bat0")
+        bat0.add_component(SpriteComponent("bat00"))
+
+        bat1 = Entity("bat1")
+        bat1.add_component(SpriteComponent("bat00"))
+
+        # self.entities.append()
+
+        self.render_system = RenderSystem(screen)
+        self.bat_animation_system = BatAnimationSystem(self)
+
     def update(self):
         # Update all active objects
         for obj in self.bats + [self.ball] + self.impacts:
@@ -333,6 +422,10 @@ class Game:
                 # After 20 frames, create a new ball, heading in the direction of the player who just missed the ball
                 direction = -1 if losing_player == 0 else 1
                 self.ball = Ball(direction)
+
+        ####### ECS UPDATES ################
+        self.bat_animation_system.update(self.entities)
+        self.render_system.update(self.entities)
 
     def draw(self):
         # Draw background
