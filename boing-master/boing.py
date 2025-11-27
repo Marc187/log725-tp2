@@ -13,7 +13,7 @@ from pgzero.keyboard import keyboard
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pgzero.builtins import screen, music, sounds
+    from pgzero.builtins import screen, music, sounds, images
 
 # Check Python version number. sys.version_info gives version as a tuple, e.g. if (3,7,2,'final',0) for version 3.7.2.
 # Unlike many languages, Python can compare two tuples in the same way that you can compare numbers.
@@ -85,26 +85,65 @@ class SpriteComponent:
         self.image_name = image_name
 
 
-class PlayerComponent:
-    def __init__(self, player_id):
-        self.id = id
+class BatComponent:
+    def __init__(self, player_index):
+        self.player_index = player_index
+        self.score = 0
+        self.timer = 0
 
 
-class TimerComponent:
-    def __init__(self, timer):
-        self.timer = timer
+class BatMovementComponent:
+    def __init__(self, move_func):
+        self.move_func = move_func
 
 
 class RenderSystem:
-    def __init__(self, screen):
-        self.screen = screen
+    # def __init__(self, screen):
+    #     self.screen = screen
 
     def update(self, entities):
         for entity in entities:
             position = entity.get_component(PositionComponent)
             sprite = entity.get_component(SpriteComponent)
             if position and sprite:
-                self.screen.blit(sprite.image_name, (position.x, position.y))
+                #self.screen.blit(sprite.image_name, (position.x, position.y))
+                image = images.load(sprite.image_name)
+                rect = image.get_rect(center=(position.x, position.y))
+                screen.blit(image, rect.topleft)
+
+
+class BatMovementSystem:
+    def __init__(self, gameObj):
+        self.game = gameObj
+
+    def update(self, entities):
+        for e in entities:
+            position = e.get_component(PositionComponent)
+            bat_movement = e.get_component(BatMovementComponent)
+
+            if not position:
+                continue
+
+            if bat_movement:
+                y_movement = bat_movement.move_func()
+            else:
+                y_movement = self.ai(e)
+
+            position.y = min(400, max(80, position.y + y_movement))
+
+    def ai(self, entity):
+        position = entity.get_component(PositionComponent)
+        x_distance = abs(game.ball.x - position.x)
+
+        target_y_1 = HALF_HEIGHT
+        target_y_2 = game.ball.y + game.ai_offset
+
+        weight1 = min(1, x_distance / HALF_WIDTH)
+        weight2 = 1 - weight1
+
+        target_y = (weight1 * target_y_1) + (weight2 * target_y_2)
+
+        return min(MAX_AI_SPEED, max(-MAX_AI_SPEED, target_y - position.y))
 
 
 class BatAnimationSystem:
@@ -113,15 +152,14 @@ class BatAnimationSystem:
 
     def update(self, entities):
         for e in entities:
-            player = e.get(PlayerComponent)
-            timer = e.get(TimerComponent)
-            sprite = e.get(SpriteComponent)
+            bat = e.get_component(BatComponent)
+            sprite = e.get_component(SpriteComponent)
 
-            if not (player and timer and sprite):
+            if not (bat and sprite):
                 continue
 
             # decide the FRAME (0, 1, or 2)
-            if timer.value <= 0:
+            if bat.timer <= 0:
                 frame = 0
             else:
                 if self.game.ball.out():
@@ -129,7 +167,7 @@ class BatAnimationSystem:
                 else:
                     frame = 1
 
-            sprite.image_name = f"bat{player.id}{frame}"
+            sprite.image_name = f"bat{bat.player_index}{frame}"
 
 
 ######################################################################################################
@@ -192,13 +230,15 @@ class Ball(Actor):
                 # ball collide with it.
 
                 if self.x < HALF_WIDTH:
+                    e_bat = get_bat_entity(game, 0)
                     new_dir_x = 1
-                    bat = game.bats[0]
                 else:
+                    e_bat = get_bat_entity(game, 1)
                     new_dir_x = -1
-                    bat = game.bats[1]
 
-                difference_y = self.y - bat.y
+                bat_position = e_bat.get_component(PositionComponent)
+                bat_component = e_bat.get_component(BatComponent)
+                difference_y = self.y - bat_position.y
 
                 if -64 < difference_y < 64:
                     # Ball has collided with bat - calculate new direction vector
@@ -243,7 +283,7 @@ class Ball(Actor):
                     game.ai_offset = random.randint(-10, 10)
 
                     # Bat glows for 10 frames
-                    bat.timer = 10
+                    bat_component.timer = 10
 
                     # Play hit sounds, with more intense sound effects as the ball gets faster
                     game.play_sound("hit", 5)  # play every time in addition to:
@@ -275,92 +315,92 @@ class Ball(Actor):
         return self.x < 0 or self.x > WIDTH
 
 
-class Bat(Actor):
-    def __init__(self, player, move_func=None):
-        x = 40 if player == 0 else 760
-        y = HALF_HEIGHT
-        super().__init__("blank", (x, y))
-
-        self.player = player
-        self.score = 0
-
-        # move_func is a function we may or may not have been passed by the code which created this object. If this bat
-        # is meant to be player controlled, move_func will be a function that when called, returns a number indicating
-        # the direction and speed in which the bat should move, based on the keys the player is currently pressing.
-        # If move_func is None, this indicates that this bat should instead be controlled by the AI method.
-        if move_func is not None:
-            self.move_func = move_func
-        else:
-            self.move_func = self.ai
-
-        # Each bat has a timer which starts at zero and counts down by one every frame. When a player concedes a point,
-        # their timer is set to 20, which causes the bat to display a different animation frame. It is also used to
-        # decide when to create a new ball in the centre of the screen - see comments in Game.update for more on this.
-        # Finally, it is used in Game.draw to determine when to display a visual effect over the top of the background
-        self.timer = 0
-
-    def update(self):
-        self.timer -= 1
-
-        # Our movement function tells us how much to move on the Y axis
-        y_movement = self.move_func()
-
-        # Apply y_movement to y position, ensuring bat does not go through the side walls
-        self.y = min(400, max(80, self.y + y_movement))
-
-        # Choose the appropriate sprite. There are 3 sprites per player - e.g. bat00 is the left-hand player's
-        # standard bat sprite, bat01 is the sprite to use when the ball has just bounced off the bat, and bat02
-        # is the sprite to use when the bat has just missed the ball and the ball has gone out of bounds.
-        # bat10, 11 and 12 are the equivalents for the right-hand player
-
-        frame = 0
-        if self.timer > 0:
-            if game.ball.out():
-                frame = 2
-            else:
-                frame = 1
-
-        self.image = "bat" + str(self.player) + str(frame)
-
-    def ai(self):
-        # Returns a number indicating how the computer player will move - e.g. 4 means it will move 4 pixels down
-        # the screen.
-
-        # To decide where we want to go, we first check to see how far we are from the ball.
-        x_distance = abs(game.ball.x - self.x)
-
-        # If the ball is far away, we move towards the centre of the screen (HALF_HEIGHT), on the basis that we don't
-        # yet know whether the ball will be in the top or bottom half of the screen when it reaches our position on
-        # the X axis. By waiting at a central position, we're as ready as it's possible to be for all eventualities.
-        target_y_1 = HALF_HEIGHT
-
-        # If the ball is close, we want to move towards its position on the Y axis. We also apply a small offset which
-        # is randomly generated each time the ball bounces. This is to make the computer player slightly less robotic
-        # - a human player wouldn't be able to hit the ball right in the centre of the bat each time.
-        target_y_2 = game.ball.y + game.ai_offset
-
-        # The final step is to work out the actual Y position we want to move towards. We use what's called a weighted
-        # average - taking the average of the two target Y positions we've previously calculated, but shifting the
-        # balance towards one or the other depending on how far away the ball is. If the ball is more than 400 pixels
-        # (half the screen width) away on the X axis, our target will be half the screen height (target_y_1). If the
-        # ball is at the same position as us on the X axis, our target will be target_y_2. If it's 200 pixels away,
-        # we'll aim for halfway between target_y_1 and target_y_2. This reflects the idea that as the ball gets closer,
-        # we have a better idea of where it's going to end up.
-        weight1 = min(1, x_distance / HALF_WIDTH)
-        weight2 = 1 - weight1
-
-        target_y = (weight1 * target_y_1) + (weight2 * target_y_2)
-
-        # Subtract target_y from our current Y position, then make sure we can't move any further than MAX_AI_SPEED
-        # each frame
-        return min(MAX_AI_SPEED, max(-MAX_AI_SPEED, target_y - self.y))
+#
+# class Bat(Actor):
+#     def __init__(self, player, move_func=None):
+#         x = 40 if player == 0 else 760
+#         y = HALF_HEIGHT
+#         super().__init__("blank", (x, y))
+#
+#         self.player = player
+#         self.score = 0
+#
+#         # move_func is a function we may or may not have been passed by the code which created this object. If this bat
+#         # is meant to be player controlled, move_func will be a function that when called, returns a number indicating
+#         # the direction and speed in which the bat should move, based on the keys the player is currently pressing.
+#         # If move_func is None, this indicates that this bat should instead be controlled by the AI method.
+#         if move_func is not None:
+#             self.move_func = move_func
+#         else:
+#             self.move_func = self.ai
+#
+#         # Each bat has a timer which starts at zero and counts down by one every frame. When a player concedes a point,
+#         # their timer is set to 20, which causes the bat to display a different animation frame. It is also used to
+#         # decide when to create a new ball in the centre of the screen - see comments in Game.update for more on this.
+#         # Finally, it is used in Game.draw to determine when to display a visual effect over the top of the background
+#         self.timer = 0
+#
+#     def update(self):
+#         self.timer -= 1
+#
+#         # Our movement function tells us how much to move on the Y axis
+#         y_movement = self.move_func()
+#
+#         # Apply y_movement to y position, ensuring bat does not go through the side walls
+#         self.y = min(400, max(80, self.y + y_movement))
+#
+#         # Choose the appropriate sprite. There are 3 sprites per player - e.g. bat00 is the left-hand player's
+#         # standard bat sprite, bat01 is the sprite to use when the ball has just bounced off the bat, and bat02
+#         # is the sprite to use when the bat has just missed the ball and the ball has gone out of bounds.
+#         # bat10, 11 and 12 are the equivalents for the right-hand player
+#
+#         frame = 0
+#         if self.timer > 0:
+#             if game.ball.out():
+#                 frame = 2
+#             else:
+#                 frame = 1
+#
+#         self.image = "bat" + str(self.player) + str(frame)
+#
+#     def ai(self):
+#         # Returns a number indicating how the computer player will move - e.g. 4 means it will move 4 pixels down
+#         # the screen.
+#
+#         # To decide where we want to go, we first check to see how far we are from the ball.
+#         x_distance = abs(game.ball.x - self.x)
+#
+#         # If the ball is far away, we move towards the centre of the screen (HALF_HEIGHT), on the basis that we don't
+#         # yet know whether the ball will be in the top or bottom half of the screen when it reaches our position on
+#         # the X axis. By waiting at a central position, we're as ready as it's possible to be for all eventualities.
+#         target_y_1 = HALF_HEIGHT
+#
+#         # If the ball is close, we want to move towards its position on the Y axis. We also apply a small offset which
+#         # is randomly generated each time the ball bounces. This is to make the computer player slightly less robotic
+#         # - a human player wouldn't be able to hit the ball right in the centre of the bat each time.
+#         target_y_2 = game.ball.y + game.ai_offset
+#
+#         # The final step is to work out the actual Y position we want to move towards. We use what's called a weighted
+#         # average - taking the average of the two target Y positions we've previously calculated, but shifting the
+#         # balance towards one or the other depending on how far away the ball is. If the ball is more than 400 pixels
+#         # (half the screen width) away on the X axis, our target will be half the screen height (target_y_1). If the
+#         # ball is at the same position as us on the X axis, our target will be target_y_2. If it's 200 pixels away,
+#         # we'll aim for halfway between target_y_1 and target_y_2. This reflects the idea that as the ball gets closer,
+#         # we have a better idea of where it's going to end up.
+#         weight1 = min(1, x_distance / HALF_WIDTH)
+#         weight2 = 1 - weight1
+#
+#         target_y = (weight1 * target_y_1) + (weight2 * target_y_2)
+#
+#         # Subtract target_y from our current Y position, then make sure we can't move any further than MAX_AI_SPEED
+#         # each frame
+#         return min(MAX_AI_SPEED, max(-MAX_AI_SPEED, target_y - self.y))
 
 
 class Game:
-    def __init__(self, controls=(None, None)):
+    def __init__(self):
         # Create a list of two bats, giving each a player number and a function to use to receive
         # control inputs (or the value None if this is intended to be an AI player)
-        self.bats = [Bat(0, controls[0]), Bat(1, controls[1])]
 
         # Create a ball object
         self.ball = Ball(-1)
@@ -375,20 +415,31 @@ class Game:
 
         # ECS IMPLEMENTATION
         self.entities = []
+
         bat0 = Entity("bat0")
+        bat0.add_component(BatComponent(0))
+        bat0.add_component(PositionComponent(40, HALF_HEIGHT))
         bat0.add_component(SpriteComponent("bat00"))
+        bat0.add_component(BatMovementComponent(p1_controls))
 
         bat1 = Entity("bat1")
-        bat1.add_component(SpriteComponent("bat00"))
+        bat1.add_component(BatComponent(1))
+        bat1.add_component(PositionComponent(760, HALF_HEIGHT))
+        bat1.add_component(SpriteComponent("bat10"))
 
-        # self.entities.append()
+        if num_players == 2:
+            bat1.add_component(BatMovementComponent(p2_controls))
 
-        self.render_system = RenderSystem(screen)
+        self.entities.append(bat0)
+        self.entities.append(bat1)
+
+        self.render_system = RenderSystem()
         self.bat_animation_system = BatAnimationSystem(self)
+        self.bat_movement_system = BatMovementSystem(self)
 
     def update(self):
         # Update all active objects
-        for obj in self.bats + [self.ball] + self.impacts:
+        for obj in [self.ball] + self.impacts:
             obj.update()
 
         # Remove any expired impact effects from the list. We go through the list backwards, starting from the last
@@ -411,41 +462,52 @@ class Game:
             # frame. Therefore, on the frame where the ball first goes off the screen, the timer will be less than zero.
             # We set it to 20, which means that this player's bat will display a different animation frame for 20
             # frames, and a new ball will be created after 20 frames
-            if self.bats[losing_player].timer < 0:
-                self.bats[scoring_player].score += 1
+            e_scoring = get_bat_entity(self, scoring_player)
+            e_losing = get_bat_entity(self, losing_player)
+
+            bat_scoring = e_scoring.get_component(BatComponent)
+            bat_losing = e_losing.get_component(BatComponent)
+
+            if bat_losing.timer < 0:
+                bat_scoring.score += 1
 
                 game.play_sound("score_goal", 1)
 
-                self.bats[losing_player].timer = 20
+                bat_losing.timer = 20
 
-            elif self.bats[losing_player].timer == 0:
+            elif bat_losing.timer == 0:
                 # After 20 frames, create a new ball, heading in the direction of the player who just missed the ball
                 direction = -1 if losing_player == 0 else 1
                 self.ball = Ball(direction)
 
-        ####### ECS UPDATES ################
+        # ================= ECS UPDATES ===============
+        self.bat_movement_system.update(self.entities)
         self.bat_animation_system.update(self.entities)
-        self.render_system.update(self.entities)
 
     def draw(self):
         # Draw background
         screen.blit("table", (0, 0))
 
         # Draw 'just scored' effects, if required
-        for p in (0, 1):
-            if self.bats[p].timer > 0 and game.ball.out():
-                screen.blit("effect" + str(p), (0, 0))
+        bats = get_bat_entities(self)
+        for bat in bats:
+            batComponent = bat.get_component(BatComponent)
+            if batComponent.timer > 0 and game.ball.out():
+                screen.blit("effect" + str(batComponent.player_index), (0, 0))
 
         # Draw bats, ball and impact effects - in that order. Square brackets are needed around the ball because
         # it's just an object, whereas the other two are lists - and you can't directly join an object onto a
         # list without first putting it in a list
-        for obj in self.bats + [self.ball] + self.impacts:
+        for obj in [self.ball] + self.impacts:
             obj.draw()
 
+        self.render_system.update(self.entities)
+
         # Display scores - outer loop goes through each player
-        for p in (0, 1):
+        for bat in bats:
+            batComponent = bat.get_component(BatComponent)
             # Convert score into a string of 2 digits (e.g. "05") so we can later get the individual digits
-            score = f"{self.bats[p].score:02d}"
+            score = f"{batComponent.score:02d}"
             # Inner loop goes through each digit
             for i in (0, 1):
                 # Digit sprites are numbered 00 to 29, where the first digit is the colour (0 = grey,
@@ -453,18 +515,22 @@ class Game:
                 # Colour is usually grey but turns red or green (depending on player number) when a
                 # point has just been scored
                 colour = "0"
-                other_p = 1 - p
-                if self.bats[other_p].timer > 0 and game.ball.out():
-                    colour = "2" if p == 0 else "1"
+                other_p = 1 - batComponent.player_index
+                other_bat_e = get_bat_entity(self, other_p)
+                other_bat = other_bat_e.get_component(BatComponent)
+                if other_bat.timer > 0 and game.ball.out():
+                    colour = "2" if batComponent.player_index == 0 else "1"
                 image = "digit" + colour + str(score[i])
-                screen.blit(image, (255 + (160 * p) + (i * 55), 46))
+                screen.blit(image, (255 + (160 * batComponent.player_index) + (i * 55), 46))
 
     def play_sound(self, name, count=1, menu_sound=False):
         # Some sounds have multiple varieties. If count > 1, we'll randomly choose one from those
         # We don't play any in-game sound effects if player 0 is an AI player - as this means we're on the menu
         # Updated Jan 2022 - some Pygame installations have issues playing ogg sound files. play_sound can skip sound
         # errors without stopping the game, but it previously couldn't be used for menu-only sounds
-        if self.bats[0].move_func != self.bats[0].ai or menu_sound:
+        bat_e = get_bat_entity(self, 0)
+        bat_component = bat_e.get_component(BatComponent)
+        if bat_component is not None or menu_sound:
             # Pygame Zero allows you to write things like 'sounds.explosion.play()'
             # This automatically loads and plays a file named 'explosion.wav' (or .ogg) from the sounds folder (if
             # such a file exists)
@@ -493,6 +559,23 @@ def p2_controls():
     elif keyboard.k:
         move = -PLAYER_SPEED
     return move
+
+
+def get_bat_entity(gameObj, player_index):
+    for e in gameObj.entities:
+        bat = e.get_component(BatComponent)
+        if bat and bat.player_index == player_index:
+            return e
+    return None
+
+
+def get_bat_entities(gameObj):
+    bats = []
+    for e in gameObj.entities:
+        bat = e.get_component(BatComponent)
+        if bat:
+            bats.append(e)
+    return bats
 
 
 class State(Enum):
@@ -525,8 +608,7 @@ def update():
             # player 1, and if we're in 2 player mode, the controls function for player 2 (otherwise the
             # 'None' value indicating this player should be computer-controlled)
             state = State.PLAY
-            controls = [p1_controls, p2_controls if num_players == 2 else None]
-            game = Game(controls)
+            game = Game()
         else:
             # Detect up/down keys
             if num_players == 2 and keyboard.up:
@@ -541,7 +623,8 @@ def update():
 
     elif state == State.PLAY:
         # Has anyone won?
-        if max(game.bats[0].score, game.bats[1].score) > 9:
+        bats = get_bat_entities(game)
+        if max(b.get_component(BatComponent).score for b in bats) > 9:
             state = State.GAME_OVER
         else:
             game.update()
